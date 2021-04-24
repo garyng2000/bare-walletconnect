@@ -15,6 +15,7 @@ void main() {
     List<String> accounts = [];
     var myMeta = {
       'description': 'Testing DART Wallet',
+      'name': 'test dart',
       'url': 'https://www.google.com',
       'icons': [
         'https://raw.githubusercontent.com/MetaMask/brand-resources/master/SVG/metamask-fox.svg'
@@ -33,15 +34,15 @@ void main() {
   querySelector('#connectWallet').onClick.listen((event) async {
     var myMeta = {
       'description': 'Testing DART DApp',
-      'url': 'https://www.google.com',
-      'icons': [
-        'https://raw.githubusercontent.com/MetaMask/brand-resources/master/SVG/metamask-fox.svg'
-      ]
+      'name': 'test dart',
+      'url': 'https://www.blabla.com/',
+      'icons': ['https://blabla.com/favicon.png']
     };
-    var sessionRequest =
-        await wcConnectWallet(bridgeUrl, myMeta, jsonRpcHandler: {
-      '_': [echo_handler]
-    });
+    var sessionRequest = await wcConnectWallet(bridgeUrl, myMeta,
+        jsonRpcHandler: {
+          '_': [echo_handler]
+        },
+        chainId: 56);
     print(sessionRequest.wcUri);
     (querySelector('#wcUri') as InputElement).value =
         sessionRequest.wcUri.toString();

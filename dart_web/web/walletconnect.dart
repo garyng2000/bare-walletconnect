@@ -53,14 +53,15 @@ class JsonRpc {
         params: jsonRpcObj['params']);
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'jsonrpc': jsonrpc,
-        'method': method,
-        'params': params,
-        'result': result,
-        'error': error
-      };
+  Map<String, dynamic> toJson() {
+    if (method != null) {
+      return {'id': id, 'jsonrpc': jsonrpc, 'method': method, 'params': params};
+    } else if (result != null) {
+      return {'id': id, 'jsonrpc': jsonrpc, 'result': result};
+    } else {
+      return {'id': id, 'jsonrpc': jsonrpc, 'error': error};
+    }
+  }
 
   @override
   String toString() {
@@ -311,7 +312,11 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
       var completer = wcSession.outstandingRpc[id].item2;
       wcSession.outstandingRpc.remove(id);
       if (completer != null) {
-        completer.complete(Tuple2(request, jsonRpc));
+        if (result != null) {
+          completer.complete(Tuple2(request, jsonRpc));
+        } else {
+          completer.completeError(Tuple2(request, jsonRpc));
+        }
       }
     } else {
       print('no matching request for response $jsonRpc');
@@ -336,7 +341,8 @@ Future<WCConnectionRequest> wcConnectWallet(
   var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
   var keyHex = Key.fromSecureRandom(32).base16;
   var ivHex = IV.fromSecureRandom(16).base16;
-  var wcUri = WCUri(sessionTopic, 1, bridgeUrl, keyHex);
+  var wcVersion = 1;
+  var wcUri = WCUri(sessionTopic, wcVersion, bridgeUrl, keyHex);
   var wcSessionRequestId = DateTime.now().millisecondsSinceEpoch;
   var wcSessionRequestAnswered = false;
   var wcSessionRequestParams = [
@@ -361,13 +367,15 @@ Future<WCConnectionRequest> wcConnectWallet(
       if (jsonRpc.id == wcSessionRequestId && !wcSessionRequestAnswered) {
         var result = jsonRpc.result;
         var error = jsonRpc.error;
+        wcSessionRequestAnswered = true;
         if (result != null) {
           wcSession.theirMeta = result['peerMeta'];
           wcSession.theirPeerId = result['peerId'];
           wcSession.isConnected = result['approved'];
-        } else if (error != null) {}
-        wcSessionRequestAnswered = true;
-        sessionRequestCompleter.complete(wcSession);
+          sessionRequestCompleter.complete(wcSession);
+        } else if (error != null) {
+          sessionRequestCompleter.completeError(error);
+        }
       } else {
         processRequest(wcSession, jsonRpc);
       }
