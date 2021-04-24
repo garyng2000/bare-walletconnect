@@ -239,9 +239,15 @@ WCPayload wcEncrypt(data, keyHex, ivHex) {
   return WCPayload(data: encrypted.base16, hmac: sig.toString(), iv: ivHex);
 }
 
-String wcDecrypt(dataHex, keyHex, ivHex) {
+String wcDecrypt(dataHex, keyHex, ivHex, {dataSig}) {
   var iv = IV.fromBase16(ivHex);
   var key = Key.fromBase16(keyHex);
+  var hmac = Hmac(sha256, hex.decode(keyHex));
+  var sig = hmac.convert(hex.decode(dataHex) + iv.bytes).toString();
+  print('$dataSig $sig');
+  if (dataSig != sig) {
+    throw Exception('pubsub hmac mis-match $dataSig vs calcualted $sig');
+  }
   final encrypter = Encrypter(AES(key, mode: AESMode.cbc));
   final decrypted = encrypter.decrypt16(dataHex, iv: iv);
   return decrypted;
@@ -252,7 +258,8 @@ JsonRpc wcDecodePubSubMessage(message, keyHex) {
   print(pubsub);
   var payload = jsonDecode(pubsub['payload']);
   print(payload);
-  var wc_request = wcDecrypt(payload['data'], keyHex, payload['iv']);
+  var wc_request = wcDecrypt(payload['data'], keyHex, payload['iv'],
+      dataSig: payload['hmac']);
   print(wc_request);
   var jsonRpc = JsonRpc.fromJson(jsonDecode(wc_request));
   return jsonRpc;
@@ -416,16 +423,20 @@ Future<Tuple2<WCSession, JsonRpc>> wcConnectDApp(String wcUrl,
       eventHandler: jsonRpcHandler);
   var sessionRequestCompleter = Completer<Tuple2<WCSession, JsonRpc>>();
   var streamSubscription = channel.stream.listen((message) {
-    var jsonRpc = wcDecodePubSubMessage(message, keyHex);
-    var method = jsonRpc.method;
-    var params = jsonRpc.params;
-    if (method == 'wc_sessionRequest') {
-      var request = params[0];
-      wcSession.theirMeta = request['peerMeta'];
-      wcSession.theirPeerId = request['peerId'];
-      sessionRequestCompleter.complete(Tuple2(wcSession, jsonRpc));
-    } else {
-      processRequest(wcSession, jsonRpc);
+    try {
+      var jsonRpc = wcDecodePubSubMessage(message, keyHex);
+      var method = jsonRpc.method;
+      var params = jsonRpc.params;
+      if (method == 'wc_sessionRequest') {
+        var request = params[0];
+        wcSession.theirMeta = request['peerMeta'];
+        wcSession.theirPeerId = request['peerId'];
+        sessionRequestCompleter.complete(Tuple2(wcSession, jsonRpc));
+      } else {
+        processRequest(wcSession, jsonRpc);
+      }
+    } catch (err) {
+      print('failed to handle message $err');
     }
   }, onError: (err, stack) {
     print(err);
