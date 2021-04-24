@@ -1,0 +1,4 @@
+Flask~=1.1
+pkcs7
+pycryptodome
+websockets==8.1
