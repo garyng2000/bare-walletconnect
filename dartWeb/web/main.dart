@@ -46,6 +46,9 @@ void main() {
     print(sessionRequest.wcUri);
     (querySelector('#wcUri') as InputElement).value =
         sessionRequest.wcUri.toString();
+    (querySelector('#deepLink') as InputElement).value =
+        sessionRequest.wcUri.universalLink('https://metamask.app.link/');
+    sessionRequest.wcUri.toString();
     var wcSession = await sessionRequest.wcSessionRequest;
     print('session request replied $wcSession');
     if (wcSession.isConnected) {

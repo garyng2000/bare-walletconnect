@@ -18,9 +18,20 @@ class WCUri {
   String keyHex;
 
   @override
-  String toString() {
-    var encodedBridgeUrl = Uri.encodeComponent(bridgeUrl);
+  String toString({encode = true}) {
+    var encodedBridgeUrl = encode ? Uri.encodeComponent(bridgeUrl) : bridgeUrl;
     return 'wc:$topic@$version?bridge=$encodedBridgeUrl&key=$keyHex';
+  }
+
+  String universalLink(appLink) {
+    return appLink + '/wc?uri=' + Uri.encodeComponent(toString(encode: true));
+  }
+
+  String deepLink(String appLink) {
+    return appLink +
+        (appLink.endsWith(':') ? '//' : '/') +
+        'wc?uri=' +
+        Uri.encodeComponent(toString(encode: true));
   }
 
   static WCUri fromString(String wcUrl) {
