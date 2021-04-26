@@ -6,7 +6,7 @@ void main() {
   querySelector('#connectDApp').onClick.listen((event) async {
     print('wallet connect invoked');
     var wcUri = (querySelector('#wcUri') as InputElement).value;
-    var sessionRequest = await wcConnectDApp(wcUri, jsonRpcHandler: {
+    var sessionRequest = await WCSession.connectSession(wcUri, jsonRpcHandler: {
       '_': [echo_handler]
     });
     var wcSession = sessionRequest.item1;
@@ -21,6 +21,7 @@ void main() {
         'https://raw.githubusercontent.com/MetaMask/brand-resources/master/SVG/metamask-fox.svg'
       ]
     };
+    print('session request from $request');
     var result = await wcSession.sendSessionRequestResponse(
         request, 'my test wallet', myMeta, accounts, true);
     print('session request ${result.item1} approved $wcSession');
@@ -30,15 +31,15 @@ void main() {
     var requestResult = await pong.item2;
     print('wc_pong $id result $requestResult');
   });
-  var bridgeUrl = (querySelector('#wcUri') as InputElement).value;
   querySelector('#connectWallet').onClick.listen((event) async {
+    var bridgeUrl = (querySelector('#bridgeUrl') as InputElement).value;
     var myMeta = {
       'description': 'Testing DART DApp',
       'name': 'test dart',
       'url': 'https://www.blabla.com/',
       'icons': ['https://blabla.com/favicon.png']
     };
-    var sessionRequest = await wcConnectWallet(bridgeUrl, myMeta,
+    var sessionRequest = await WCSession.createSession(bridgeUrl, myMeta,
         jsonRpcHandler: {
           '_': [echo_handler]
         },

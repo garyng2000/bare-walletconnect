@@ -1,13 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:convert/convert.dart';
-import 'package:encrypt/encrypt.dart';
 import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart';
+import 'package:logger/logger.dart';
 import 'package:tuple/tuple.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 //import 'package:web_socket_channel/status.dart' as status;
+
+var _loggerPrinter = PrettyPrinter(
+  methodCount: 0,
+  errorMethodCount: 0,
+  lineLength: 50,
+  colors: false,
+  printEmojis: false,
+  printTime: false,
+);
 
 class WCUri {
   WCUri(this.topic, this.version, this.bridgeUrl, this.keyHex);
@@ -24,12 +34,15 @@ class WCUri {
   }
 
   String universalLink(appLink) {
-    return appLink + '/wc?uri=' + Uri.encodeComponent(toString(encode: true));
+    return appLink +
+        (appLink.endsWith('/') ? '' : '/') +
+        'wc?uri=' +
+        Uri.encodeComponent(toString(encode: true));
   }
 
   String deepLink(String appLink) {
     return appLink +
-        (appLink.endsWith(':') ? '//' : '/') +
+        (appLink.endsWith(':') ? '//' : (appLink.endsWith('/') ? '' : '/')) +
         'wc?uri=' +
         Uri.encodeComponent(toString(encode: true));
   }
@@ -112,6 +125,21 @@ class WCPayload {
   Map<String, dynamic> toJson() => {'data': data, 'hmac': hmac, 'iv': iv};
 }
 
+class WCConnectionRequest {
+  WCConnectionRequest(
+      {this.wcUri,
+      this.webSocketChannel,
+      this.streamSubscription,
+      this.requestResponse,
+      this.wcSessionRequest});
+
+  WebSocketChannel webSocketChannel;
+  StreamSubscription<dynamic> streamSubscription;
+  Future<WCSession> wcSessionRequest;
+  Future<dynamic> requestResponse;
+  WCUri wcUri;
+}
+
 WCPubSub wcPubsub(topicId, payload, type, isSilent) {
   return WCPubSub(
       topic: topicId,
@@ -126,16 +154,19 @@ class WCSession {
       this.webSocketChannel,
       this.keyHex,
       this.ourPeerId,
+      this.logger,
       this.eventHandler,
       this.bridgeUrl});
 
   WebSocketChannel webSocketChannel;
   StreamSubscription<dynamic> streamSubscription;
+  Logger logger;
   String bridgeUrl;
   String sessionTopic;
   String keyHex;
   String ourPeerId;
   bool isConnected = false;
+  bool isActive = false;
   Map<int, Tuple2<JsonRpc, Completer<dynamic>>> outstandingRpc = {};
   Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> eventHandler = {};
   int chainId;
@@ -143,15 +174,16 @@ class WCSession {
   String theirPeerId;
   Map<String, dynamic> theirMeta;
 
-  Future<Tuple2<int, Future<dynamic>>> sendRequest(method, params) async {
-    if (!isConnected) {
+  Future<Tuple2<int, Future<dynamic>>> sendRequest(method, params,
+      {peerId}) async {
+    if (!isConnected && method != 'wc_sessionRequest') {
       return Future.error('invalid session');
     }
     var id = DateTime.now().millisecondsSinceEpoch;
     var jsonRpc = JsonRpc(id, method: method, params: params);
     var ivHex = IV.fromSecureRandom(16).base16;
     var wcRequest = wcEncrypt(jsonEncode(jsonRpc), keyHex, ivHex);
-    var wcRequestPub = wcPubsub(theirPeerId, wcRequest, 'pub', true);
+    var wcRequestPub = wcPubsub(peerId ?? theirPeerId, wcRequest, 'pub', true);
     var completer = Completer<dynamic>();
     outstandingRpc[id] = Tuple2(jsonRpc, completer);
     webSocketChannel.sink.add(jsonEncode(wcRequestPub));
@@ -159,7 +191,7 @@ class WCSession {
   }
 
   Future<Tuple2<int, Future<dynamic>>> sendResponse(id, method,
-      {result, error}) async {
+      {result, error, peerId}) async {
     if (!isConnected && method != 'wc_sessionRequest') {
       return Future.error('invalid session');
     }
@@ -168,20 +200,31 @@ class WCSession {
     var wcRequest = wcEncrypt(jsonEncode(jsonRpc), keyHex, ivHex);
     var wcRequestPub = wcPubsub(theirPeerId, wcRequest, 'pub', true);
     webSocketChannel.sink.add(jsonEncode(wcRequestPub));
-    if (method == 'wc_sessionRequest') {
-      var wcRequestSub = wcPubsub(ourPeerId, {}, 'sub', true);
-      webSocketChannel.sink.add(jsonEncode(wcRequestSub));
-    }
     return Tuple2(id, Future.value(true));
   }
 
-  Future<Tuple2<int, Future>> sendSessionRequestResponse(
+  Future<WCSession> sendSessionRequest(myMeta) async {
+    var wcSessionRequestParams = [
+      {'peerId': ourPeerId, 'peerMeta': myMeta, 'chainId': chainId}
+    ];
+    // ignore: unused_local_variable
+    var request = await sendRequest('wc_sessionRequest', wcSessionRequestParams,
+        peerId: sessionTopic);
+    // ignore: unused_local_variable
+    var id = request.item1;
+    // ignore: unused_local_variable
+    var result = await request.item2;
+    return this;
+  }
+
+  Future<Tuple2<int, Future<dynamic>>> sendSessionRequestResponse(
       JsonRpc sessionRequest,
       String myName,
       Map<String, dynamic> myMeta,
       List<String> accounts,
       bool approved,
       {String rpcUrl,
+      int chainId,
       bool ssl = true}) {
     var wcSessionRequestResult = {
       'approved': approved,
@@ -194,10 +237,19 @@ class WCSession {
       'peerMeta': myMeta,
       'chainId': chainId
     };
-    var response = sendResponse(sessionRequest.id, sessionRequest.method,
-        result: wcSessionRequestResult);
-    isConnected = true;
-    return response;
+    try {
+      var response = sendResponse(sessionRequest.id, sessionRequest.method,
+          result: wcSessionRequestResult);
+      if (approved) {
+        isConnected = true;
+        isActive = true;
+        var wcRequestSub = wcPubsub(ourPeerId, {}, 'sub', true);
+        webSocketChannel.sink.add(jsonEncode(wcRequestSub));
+      }
+      return response;
+    } catch (err) {
+      return Future.error(err);
+    }
   }
 
   void setEventHandler(method, handler, {remove = false}) {
@@ -220,23 +272,112 @@ class WCSession {
       'theirPeerId': theirPeerId,
       'theirMeta': theirMeta,
       'isConnected': isConnected,
+      'isActive': isActive,
       'bridgeUrl': bridgeUrl
     };
     return jsonEncode(obj);
   }
-}
 
-class WCConnectionRequest {
-  WCConnectionRequest(
-      {this.wcUri,
-      this.webSocketChannel,
-      this.streamSubscription,
-      this.wcSessionRequest});
+  Future<WCSession> connect(
+      {String topic,
+      void Function(WCSession, JsonRpc) sessionRequestHandler}) async {
+    try {
+      var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
+      var subTopic = topic ?? ourPeerId;
+      var wcSessionSub = wcPubsub(subTopic, {}, 'sub', true);
+      var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      var ss = channel.stream.listen((message) {
+        try {
+          var jsonRpc = wcDecodePubSubMessage(message, keyHex);
+          var method = jsonRpc.method;
 
-  WebSocketChannel webSocketChannel;
-  StreamSubscription<dynamic> streamSubscription;
-  Future<WCSession> wcSessionRequest;
-  WCUri wcUri;
+          if (method == 'wc_sessionRequest') {
+            var params = jsonRpc.params;
+            if (params != null && params.isNotEmpty) {
+              var request = params[0];
+              theirMeta = request['peerMeta'];
+              theirPeerId = request['peerId'];
+            }
+            if (sessionRequestHandler != null) {
+              sessionRequestHandler(this, jsonRpc);
+            }
+          }
+
+          if (method != 'wc_sessionRequest' ||
+              (eventHandler != null &&
+                  eventHandler.containsKey('wc_sessionRequest') &&
+                  eventHandler['wc_sessionRequest'].isNotEmpty)) {
+            processMessage(this, jsonRpc);
+          }
+        } catch (err) {
+          logger.d('bad walletconnect request $err');
+        }
+      }, onError: (err, stack) {
+        logger.d('$bridgeUrl $err $stack');
+      }, onDone: () {
+        logger.d('$bridgeUrl done');
+      });
+      streamSubscription = ss;
+      webSocketChannel = channel;
+      channel.sink.add(jsonEncode(wcSessionSub));
+      return Future.value(this);
+    } catch (err, stack) {
+      return Future.error(err, stack);
+    }
+  }
+
+  static Future<WCConnectionRequest> createSession(
+      String bridgeUrl, Map<String, dynamic> myMeta,
+      {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
+      Logger logger,
+      int chainId}) async {
+    var uuidGenerator = Uuid();
+    var sessionTopic = uuidGenerator.v4();
+    var myPeerId = uuidGenerator.v4();
+    var keyHex = Key.fromSecureRandom(32).base16;
+    var wcVersion = 1;
+    var wcSession = WCSession(
+        keyHex: keyHex,
+        sessionTopic: sessionTopic,
+        ourPeerId: myPeerId,
+        bridgeUrl: bridgeUrl,
+        logger: logger ?? Logger(printer: _loggerPrinter),
+        eventHandler: jsonRpcHandler);
+    var wcUri = WCUri(sessionTopic, wcVersion, bridgeUrl, keyHex);
+
+    await wcSession.connect();
+    return WCConnectionRequest(
+        wcUri: wcUri,
+        webSocketChannel: wcSession.webSocketChannel,
+        streamSubscription: wcSession.streamSubscription,
+        wcSessionRequest: wcSession.sendSessionRequest(myMeta));
+  }
+
+  static Future<Tuple2<WCSession, JsonRpc>> connectSession(String wcUrl,
+      {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
+      Logger logger}) async {
+    var uuidGenerator = Uuid();
+    var wcUri = WCUri.fromString(wcUrl);
+    var bridgeUrl = wcUri.bridgeUrl.trim();
+    var keyHex = wcUri.keyHex;
+    var sessionTopic = wcUri.topic;
+    var myPeerId = uuidGenerator.v4();
+    var sessionRequestCompleter = Completer<Tuple2<WCSession, JsonRpc>>();
+    var wcSession = WCSession(
+        keyHex: keyHex,
+        sessionTopic: sessionTopic,
+        ourPeerId: myPeerId,
+        bridgeUrl: bridgeUrl,
+        logger: logger ?? Logger(printer: _loggerPrinter),
+        eventHandler: jsonRpcHandler);
+    void handleSessionRequest(wcSession, jsonRpc) {
+      sessionRequestCompleter.complete(Tuple2(wcSession, jsonRpc));
+    }
+
+    await wcSession.connect(
+        topic: sessionTopic, sessionRequestHandler: handleSessionRequest);
+    return sessionRequestCompleter.future;
+  }
 }
 
 WCPayload wcEncrypt(data, keyHex, ivHex) {
@@ -255,7 +396,6 @@ String wcDecrypt(dataHex, keyHex, ivHex, {dataSig}) {
   var key = Key.fromBase16(keyHex);
   var hmac = Hmac(sha256, hex.decode(keyHex));
   var sig = hmac.convert(hex.decode(dataHex) + iv.bytes).toString();
-  print('$dataSig $sig');
   if (dataSig != sig) {
     throw Exception('pubsub hmac mis-match $dataSig vs calcualted $sig');
   }
@@ -266,17 +406,14 @@ String wcDecrypt(dataHex, keyHex, ivHex, {dataSig}) {
 
 JsonRpc wcDecodePubSubMessage(message, keyHex) {
   var pubsub = jsonDecode(message);
-  print(pubsub);
   var payload = jsonDecode(pubsub['payload']);
-  print(payload);
   var wc_request = wcDecrypt(payload['data'], keyHex, payload['iv'],
       dataSig: payload['hmac']);
-  print(wc_request);
   var jsonRpc = JsonRpc.fromJson(jsonDecode(wc_request));
   return jsonRpc;
 }
 
-void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
+void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
   var id = jsonRpc.id;
   var method = jsonRpc.method;
   //var params = jsonRpc.params;
@@ -285,6 +422,7 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
   var internalErr;
   var handled = false;
   var hasHandler = false;
+  var logger = wcSession.logger;
   if (method != null) {
     if (wcSession.eventHandler != null) {
       var handlers = wcSession.eventHandler.containsKey(method)
@@ -297,7 +435,7 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
           handled = true;
         } catch (err) {
           internalErr = err;
-          print('$err');
+          logger.d('$err');
         }
       }
     }
@@ -309,7 +447,7 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
           handled = true;
         } catch (err) {
           internalErr = err;
-          print('$err');
+          logger.d('$err');
         }
       }
     }
@@ -319,7 +457,7 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
         'error': {
           'code': internalErr != null ? -32063 : -32601,
           'message':
-              internalErr != null ? internalErr.toString() : 'Method not found'
+              internalErr != null ? internalErr.toString() : 'method not found'
         }
       };
       wcSession.sendResponse(jsonRpc.id, jsonRpc.method, error: errorResponse);
@@ -329,6 +467,14 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
       var request = wcSession.outstandingRpc[id].item1;
       var completer = wcSession.outstandingRpc[id].item2;
       wcSession.outstandingRpc.remove(id);
+      if (request.method == 'wc_sessionRequest') {
+        if (result != null) {
+          wcSession.theirMeta = result['peerMeta'];
+          wcSession.theirPeerId = result['peerId'];
+          wcSession.isConnected = result['approved'];
+          wcSession.isActive = wcSession.isConnected;
+        }
+      }
       if (completer != null) {
         if (result != null) {
           completer.complete(Tuple2(request, jsonRpc));
@@ -337,127 +483,11 @@ void processRequest(WCSession wcSession, JsonRpc jsonRpc) {
         }
       }
     } else {
-      print('no matching request for response $jsonRpc');
+      logger.d('no matching request for response $jsonRpc');
     }
   } else {
-    print('uknown request $method');
+    logger.d('uknown request $method');
   }
-}
-
-Future<WCConnectionRequest> wcConnectWallet(
-    String bridgeUrl, Map<String, dynamic> myMeta,
-    {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
-    int chainId}) async {
-  var uuidGenerator = Uuid();
-  var sessionTopic = uuidGenerator.v4();
-  var myPeerId = uuidGenerator.v4();
-  if (bridgeUrl.trim() != '') {
-    bridgeUrl = bridgeUrl.trim();
-  } else {
-    bridgeUrl = 'https://wcbridge.garyng.com';
-  }
-  var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
-  var keyHex = Key.fromSecureRandom(32).base16;
-  var ivHex = IV.fromSecureRandom(16).base16;
-  var wcVersion = 1;
-  var wcUri = WCUri(sessionTopic, wcVersion, bridgeUrl, keyHex);
-  var wcSessionRequestId = DateTime.now().millisecondsSinceEpoch;
-  var wcSessionRequestAnswered = false;
-  var wcSessionRequestParams = [
-    {'peerId': myPeerId, 'peerMeta': myMeta, 'chainId': chainId}
-  ];
-  var wcSessionRequest = JsonRpc(wcSessionRequestId,
-      method: 'wc_sessionRequest', params: wcSessionRequestParams);
-  var pubPayLoad = wcEncrypt(jsonEncode(wcSessionRequest), keyHex, ivHex);
-  var wcSessionPub = wcPubsub(sessionTopic, pubPayLoad, 'pub', true);
-  var wcSessionSub = wcPubsub(myPeerId, {}, 'sub', true);
-  var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-  var wcSession = WCSession(
-      keyHex: keyHex,
-      webSocketChannel: channel,
-      ourPeerId: myPeerId,
-      bridgeUrl: bridgeUrl.trim(),
-      eventHandler: jsonRpcHandler);
-  var sessionRequestCompleter = Completer<WCSession>();
-  var streamSubscription = channel.stream.listen((message) {
-    try {
-      var jsonRpc = wcDecodePubSubMessage(message, keyHex);
-      if (jsonRpc.id == wcSessionRequestId && !wcSessionRequestAnswered) {
-        var result = jsonRpc.result;
-        var error = jsonRpc.error;
-        wcSessionRequestAnswered = true;
-        if (result != null) {
-          wcSession.theirMeta = result['peerMeta'];
-          wcSession.theirPeerId = result['peerId'];
-          wcSession.isConnected = result['approved'];
-          sessionRequestCompleter.complete(wcSession);
-        } else if (error != null) {
-          sessionRequestCompleter.completeError(error);
-        }
-      } else {
-        processRequest(wcSession, jsonRpc);
-      }
-    } catch (err) {
-      print('bad wcconnect request $err');
-    }
-  }, onError: (err, stack) {
-    print('$bridgeUrl $err $stack');
-  }, onDone: () {
-    print('$bridgeUrl done');
-  });
-  wcSession.streamSubscription = streamSubscription;
-  channel.sink.add(jsonEncode(wcSessionPub));
-  channel.sink.add(jsonEncode(wcSessionSub));
-  return WCConnectionRequest(
-      wcUri: wcUri,
-      webSocketChannel: channel,
-      streamSubscription: streamSubscription,
-      wcSessionRequest: sessionRequestCompleter.future);
-}
-
-Future<Tuple2<WCSession, JsonRpc>> wcConnectDApp(String wcUrl,
-    {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>>
-        jsonRpcHandler}) async {
-  var wcUri = WCUri.fromString(wcUrl);
-  var bridgeUrl = wcUri.bridgeUrl.trim();
-  var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
-  var keyHex = wcUri.keyHex;
-  var sessionTopic = wcUri.topic;
-  var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-  var uuidGenerator = Uuid();
-  var myPeerId = uuidGenerator.v4();
-  var wcSession = WCSession(
-      keyHex: keyHex,
-      webSocketChannel: channel,
-      ourPeerId: myPeerId,
-      bridgeUrl: bridgeUrl,
-      eventHandler: jsonRpcHandler);
-  var sessionRequestCompleter = Completer<Tuple2<WCSession, JsonRpc>>();
-  var streamSubscription = channel.stream.listen((message) {
-    try {
-      var jsonRpc = wcDecodePubSubMessage(message, keyHex);
-      var method = jsonRpc.method;
-      var params = jsonRpc.params;
-      if (method == 'wc_sessionRequest') {
-        var request = params[0];
-        wcSession.theirMeta = request['peerMeta'];
-        wcSession.theirPeerId = request['peerId'];
-        sessionRequestCompleter.complete(Tuple2(wcSession, jsonRpc));
-      } else {
-        processRequest(wcSession, jsonRpc);
-      }
-    } catch (err) {
-      print('failed to handle message $err');
-    }
-  }, onError: (err, stack) {
-    print(err);
-  }, onDone: () {
-    print('done');
-  });
-  wcSession.streamSubscription = streamSubscription;
-  var wc_getRequest = wcPubsub(sessionTopic, {}, 'sub', true);
-  channel.sink.add(jsonEncode(wc_getRequest));
-  return sessionRequestCompleter.future;
 }
 
 JsonRpc echo_handler(WCSession wcSession, JsonRpc jsonRpc) {
@@ -465,6 +495,7 @@ JsonRpc echo_handler(WCSession wcSession, JsonRpc jsonRpc) {
   var result = jsonRpc.result;
   var error = jsonRpc.error;
   var id = jsonRpc.id;
+  var logger = wcSession.logger;
   if (method != null) {
     var echoResult = {
       'request': {'params': jsonRpc.params, 'method': method, 'id': id}
@@ -472,9 +503,9 @@ JsonRpc echo_handler(WCSession wcSession, JsonRpc jsonRpc) {
     wcSession.sendResponse(id, method, result: echoResult);
     return JsonRpc(id, result: echoResult);
   } else if (result != null) {
-    print('should not be here, $result');
+    logger.d('should not be here, $result');
   } else if (error != null) {
-    print('should not be here either, $error');
+    logger.d('should not be here either, $error');
   }
   return JsonRpc(id, result: {});
 }
