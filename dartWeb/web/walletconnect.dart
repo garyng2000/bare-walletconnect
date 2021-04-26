@@ -19,6 +19,16 @@ var _loggerPrinter = PrettyPrinter(
   printTime: false,
 );
 
+class WCCustomException implements Exception {
+  JsonRpc request;
+  JsonRpc result;
+  dynamic error;
+  dynamic cause;
+  String errorType;
+  WCCustomException(this.request, this.errorType,
+      {this.error, this.result, this.cause});
+}
+
 class WCUri {
   WCUri(this.topic, this.version, this.bridgeUrl, this.keyHex);
 
@@ -106,6 +116,11 @@ class WCPubSub {
         payload = json['payload'],
         silent = json['silent'];
 
+  @override
+  String toString() {
+    return jsonEncode(this);
+  }
+
   Map<String, dynamic> toJson() =>
       {'topic': topic, 'type': type, 'payload': payload, 'silent': silent};
 }
@@ -169,15 +184,26 @@ class WCSession {
   bool isActive = false;
   Map<int, Tuple2<JsonRpc, Completer<dynamic>>> outstandingRpc = {};
   Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> eventHandler = {};
+  int theirChainId;
+  List<dynamic> theirAccounts;
   int chainId;
-  String rpcUrl;
+  String theirRpcUrl;
   String theirPeerId;
   Map<String, dynamic> theirMeta;
 
+  Future<dynamic> timeoutAfter({int sec, Function() onTimeout}) async {
+    return Future.delayed(Duration(seconds: sec), onTimeout);
+  }
+
   Future<Tuple2<int, Future<dynamic>>> sendRequest(method, params,
-      {peerId}) async {
+      {peerId, int timeoutSec}) async {
     if (!isConnected && method != 'wc_sessionRequest') {
-      return Future.error('invalid session');
+      if (isActive) {
+        logger.d('reconnect $this');
+        await connect();
+      } else {
+        return Future.error('invalid session');
+      }
     }
     var id = DateTime.now().millisecondsSinceEpoch;
     var jsonRpc = JsonRpc(id, method: method, params: params);
@@ -185,15 +211,38 @@ class WCSession {
     var wcRequest = wcEncrypt(jsonEncode(jsonRpc), keyHex, ivHex);
     var wcRequestPub = wcPubsub(peerId ?? theirPeerId, wcRequest, 'pub', true);
     var completer = Completer<dynamic>();
-    outstandingRpc[id] = Tuple2(jsonRpc, completer);
+    var responseJsonRpc = JsonRpc(id, result: {'status': 'success'});
+    if (method != 'wc_sessionUpdate') {
+      outstandingRpc[id] = Tuple2(jsonRpc, completer);
+    }
     webSocketChannel.sink.add(jsonEncode(wcRequestPub));
-    return Tuple2(id, completer.future);
+    return Tuple2(
+        id,
+        ((timeoutSec ?? 0) <= 0
+            ? completer.future
+            : Future.any([
+                method == 'wc_sessionUpdate'
+                    ? Future.value(Tuple2(jsonRpc, responseJsonRpc))
+                    : completer.future,
+                timeoutAfter(
+                  sec: timeoutSec,
+                  onTimeout: () {
+                    return Future.error(WCCustomException(jsonRpc, 'timeout',
+                        error: {
+                          'message': 'no response after ${timeoutSec}s'
+                        }));
+                  },
+                )
+              ])));
   }
 
   Future<Tuple2<int, Future<dynamic>>> sendResponse(id, method,
       {result, error, peerId}) async {
     if (!isConnected && method != 'wc_sessionRequest') {
-      return Future.error('invalid session');
+      if (isActive) {
+      } else {
+        return Future.error('invalid session');
+      }
     }
     var jsonRpc = JsonRpc(id, result: result, error: error);
     var ivHex = IV.fromSecureRandom(16).base16;
@@ -203,13 +252,13 @@ class WCSession {
     return Tuple2(id, Future.value(true));
   }
 
-  Future<WCSession> sendSessionRequest(myMeta) async {
+  Future<WCSession> sendSessionRequest(myMeta, {int timeoutSec}) async {
     var wcSessionRequestParams = [
       {'peerId': ourPeerId, 'peerMeta': myMeta, 'chainId': chainId}
     ];
     // ignore: unused_local_variable
     var request = await sendRequest('wc_sessionRequest', wcSessionRequestParams,
-        peerId: sessionTopic);
+        peerId: sessionTopic, timeoutSec: timeoutSec);
     // ignore: unused_local_variable
     var id = request.item1;
     // ignore: unused_local_variable
@@ -252,6 +301,34 @@ class WCSession {
     }
   }
 
+  Future<dynamic> close() async {
+    isConnected = false;
+    return timeoutAfter(
+        sec: 0,
+        onTimeout: () async {
+          return await webSocketChannel.sink.close(
+              1000,
+              isActive
+                  ? 'socket released session still active'
+                  : 'session destroyed from local');
+        });
+  }
+
+  Future<dynamic> destroy() async {
+    var params = [
+      {
+        'approved': false,
+        'chainId': chainId,
+        'accounts': [],
+        'rpcUrl': null,
+      }
+    ];
+    await sendRequest('wc_sessionUpdate', params);
+    isActive = false;
+    isConnected = false;
+    return close();
+  }
+
   void setEventHandler(method, handler, {remove = false}) {
     eventHandler ??= {};
     if (!eventHandler.containsKey(method)) {
@@ -273,6 +350,9 @@ class WCSession {
       'theirMeta': theirMeta,
       'isConnected': isConnected,
       'isActive': isActive,
+      'theirChainId': theirChainId,
+      'theirRpcUrl': theirRpcUrl,
+      'accounts': theirAccounts,
       'bridgeUrl': bridgeUrl
     };
     return jsonEncode(obj);
@@ -286,6 +366,7 @@ class WCSession {
       var subTopic = topic ?? ourPeerId;
       var wcSessionSub = wcPubsub(subTopic, {}, 'sub', true);
       var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      logger.d('session $this $wcSessionSub');
       var ss = channel.stream.listen((message) {
         try {
           var jsonRpc = wcDecodePubSubMessage(message, keyHex);
@@ -297,9 +378,22 @@ class WCSession {
               var request = params[0];
               theirMeta = request['peerMeta'];
               theirPeerId = request['peerId'];
+              theirChainId = request['chainId'];
+              theirRpcUrl = request['rpcUrl'];
+              theirAccounts = request['accounts'];
             }
             if (sessionRequestHandler != null) {
               sessionRequestHandler(this, jsonRpc);
+            }
+          } else if (method == 'wc_sessionUpdate') {
+            var params = jsonRpc.params;
+            if (params != null && params.isNotEmpty) {
+              var request = params[0];
+              isConnected = request['approved'];
+              isActive = isConnected;
+              theirChainId = request['chainId'];
+              theirRpcUrl = request['rpcUrl'];
+              theirAccounts = request['accounts'];
             }
           }
 
@@ -313,9 +407,10 @@ class WCSession {
           logger.d('bad walletconnect request $err');
         }
       }, onError: (err, stack) {
-        logger.d('$bridgeUrl $err $stack');
+        logger.d('$this $err $stack');
       }, onDone: () {
-        logger.d('$bridgeUrl done');
+        isConnected = false;
+        logger.d('$this socket done, session active: $isActive');
       });
       streamSubscription = ss;
       webSocketChannel = channel;
@@ -330,7 +425,8 @@ class WCSession {
       String bridgeUrl, Map<String, dynamic> myMeta,
       {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
       Logger logger,
-      int chainId}) async {
+      int chainId,
+      int timeoutSec}) async {
     var uuidGenerator = Uuid();
     var sessionTopic = uuidGenerator.v4();
     var myPeerId = uuidGenerator.v4();
@@ -350,7 +446,8 @@ class WCSession {
         wcUri: wcUri,
         webSocketChannel: wcSession.webSocketChannel,
         streamSubscription: wcSession.streamSubscription,
-        wcSessionRequest: wcSession.sendSessionRequest(myMeta));
+        wcSessionRequest:
+            wcSession.sendSessionRequest(myMeta, timeoutSec: timeoutSec));
   }
 
   static Future<Tuple2<WCSession, JsonRpc>> connectSession(String wcUrl,
@@ -472,6 +569,9 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
           wcSession.theirMeta = result['peerMeta'];
           wcSession.theirPeerId = result['peerId'];
           wcSession.isConnected = result['approved'];
+          wcSession.theirChainId = result['chainId'];
+          wcSession.theirRpcUrl = result['rpcUrl'];
+          wcSession.theirAccounts = result['accounts'];
           wcSession.isActive = wcSession.isConnected;
         }
       }
@@ -479,7 +579,9 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
         if (result != null) {
           completer.complete(Tuple2(request, jsonRpc));
         } else {
-          completer.completeError(Tuple2(request, jsonRpc));
+          logger.d('error on request $request $jsonRpc');
+          completer.completeError(
+              WCCustomException(request, 'server', error: error));
         }
       }
     } else {
@@ -500,7 +602,10 @@ JsonRpc echo_handler(WCSession wcSession, JsonRpc jsonRpc) {
     var echoResult = {
       'request': {'params': jsonRpc.params, 'method': method, 'id': id}
     };
-    wcSession.sendResponse(id, method, result: echoResult);
+    logger.i('$wcSession get request $jsonRpc');
+    if (method != 'wc_sessionUpdate') {
+      wcSession.sendResponse(id, method, result: echoResult);
+    }
     return JsonRpc(id, result: echoResult);
   } else if (result != null) {
     logger.d('should not be here, $result');

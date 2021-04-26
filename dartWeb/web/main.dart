@@ -25,6 +25,7 @@ void main() {
     var result = await wcSession.sendSessionRequestResponse(
         request, 'my test wallet', myMeta, accounts, true);
     print('session request ${result.item1} approved $wcSession');
+    await Future.delayed(Duration(seconds: 10), () {});
     var pong = await wcSession.sendRequest('wc_pong', []);
     var id = pong.item1;
     print('wc_pong $id request');
@@ -50,14 +51,23 @@ void main() {
     (querySelector('#deepLink') as InputElement).value =
         sessionRequest.wcUri.universalLink('https://metamask.app.link/');
     sessionRequest.wcUri.toString();
-    var wcSession = await sessionRequest.wcSessionRequest;
-    print('session request replied $wcSession');
-    if (wcSession.isConnected) {
-      var ping = await wcSession.sendRequest('wc_ping', []);
-      var id = ping.item1;
-      print('wc_ping $id request');
-      var requestResult = await ping.item2;
-      print('wc_ping $id result $requestResult');
+    try {
+      var wcSession = await sessionRequest.wcSessionRequest;
+      print('session request replied $wcSession');
+      await wcSession.close();
+      await Future.delayed(Duration(seconds: 20), () {});
+      await wcSession.connect();
+      // if (wcSession.isActive) {
+      //   var ping = await wcSession.sendRequest('wc_ping', []);
+      //   var id = ping.item1;
+      //   print('wc_ping $id request');
+      //   var requestResult = await ping.item2;
+      //   print('wc_ping $id result $requestResult');
+      // }
+    } on WCCustomException catch (error) {
+      print('session request error ${error.error}');
+    } catch (error) {
+      print('session request error $error');
     }
   });
 }
