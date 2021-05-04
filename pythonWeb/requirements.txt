@@ -1,4 +1,4 @@
-Flask~=1.1
-pkcs7
+Flask
+jsons
 pycryptodome
 websockets==8.1
