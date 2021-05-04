@@ -40,23 +40,25 @@ void main() {
       'url': 'https://www.blabla.com/',
       'icons': ['https://blabla.com/favicon.png']
     };
-    var sessionRequest = await WCSession.createSession(bridgeUrl, myMeta,
-        jsonRpcHandler: {
-          '_': [echo_handler]
-        },
-        chainId: 56);
-    print(sessionRequest.wcUri);
-    (querySelector('#wcUri') as InputElement).value =
-        sessionRequest.wcUri.toString();
-    (querySelector('#deepLink') as InputElement).value =
-        sessionRequest.wcUri.universalLink('https://metamask.app.link/');
-    sessionRequest.wcUri.toString();
     try {
+      var sessionRequest = await WCSession.createSession(bridgeUrl, myMeta,
+          jsonRpcHandler: {
+            '_': [echo_handler]
+          },
+          chainId: 56);
+      print(sessionRequest.wcUri);
+      (querySelector('#wcUri') as InputElement).value =
+          sessionRequest.wcUri.toString();
+      (querySelector('#deepLink') as InputElement).value =
+          sessionRequest.wcUri.universalLink('https://metamask.app.link/');
+      sessionRequest.wcUri.toString();
       var wcSession = await sessionRequest.wcSessionRequest;
       print('session request replied $wcSession');
       await wcSession.close();
       await Future.delayed(Duration(seconds: 20), () {});
       await wcSession.connect();
+      var params = [];
+      await wcSession.sendRequest('eth_chainId', params);
       // if (wcSession.isActive) {
       //   var ping = await wcSession.sendRequest('wc_ping', []);
       //   var id = ping.item1;

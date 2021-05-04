@@ -155,7 +155,7 @@ class WCConnectionRequest {
   WCUri wcUri;
 }
 
-WCPubSub wcPubsub(topicId, payload, type, isSilent) {
+WCPubSub wcPubSub(topicId, payload, type, isSilent) {
   return WCPubSub(
       topic: topicId,
       payload: jsonEncode(payload),
@@ -171,6 +171,7 @@ class WCSession {
       this.ourPeerId,
       this.logger,
       this.eventHandler,
+      this.chainId,
       this.bridgeUrl});
 
   WebSocketChannel webSocketChannel;
@@ -209,7 +210,7 @@ class WCSession {
     var jsonRpc = JsonRpc(id, method: method, params: params);
     var ivHex = IV.fromSecureRandom(16).base16;
     var wcRequest = wcEncrypt(jsonEncode(jsonRpc), keyHex, ivHex);
-    var wcRequestPub = wcPubsub(peerId ?? theirPeerId, wcRequest, 'pub', true);
+    var wcRequestPub = wcPubSub(peerId ?? theirPeerId, wcRequest, 'pub', true);
     var completer = Completer<dynamic>();
     var responseJsonRpc = JsonRpc(id, result: {'status': 'success'});
     if (method != 'wc_sessionUpdate') {
@@ -227,6 +228,10 @@ class WCSession {
                 timeoutAfter(
                   sec: timeoutSec,
                   onTimeout: () {
+                    try {
+                      outstandingRpc.remove(id);
+                      // ignore: empty_catches
+                    } catch (e) {}
                     return Future.error(WCCustomException(jsonRpc, 'timeout',
                         error: {
                           'message': 'no response after ${timeoutSec}s'
@@ -247,7 +252,7 @@ class WCSession {
     var jsonRpc = JsonRpc(id, result: result, error: error);
     var ivHex = IV.fromSecureRandom(16).base16;
     var wcRequest = wcEncrypt(jsonEncode(jsonRpc), keyHex, ivHex);
-    var wcRequestPub = wcPubsub(theirPeerId, wcRequest, 'pub', true);
+    var wcRequestPub = wcPubSub(theirPeerId, wcRequest, 'pub', true);
     webSocketChannel.sink.add(jsonEncode(wcRequestPub));
     return Tuple2(id, Future.value(true));
   }
@@ -292,7 +297,7 @@ class WCSession {
       if (approved) {
         isConnected = true;
         isActive = true;
-        var wcRequestSub = wcPubsub(ourPeerId, {}, 'sub', true);
+        var wcRequestSub = wcPubSub(ourPeerId, {}, 'sub', true);
         webSocketChannel.sink.add(jsonEncode(wcRequestSub));
       }
       return response;
@@ -364,7 +369,7 @@ class WCSession {
     try {
       var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
       var subTopic = topic ?? ourPeerId;
-      var wcSessionSub = wcPubsub(subTopic, {}, 'sub', true);
+      var wcSessionSub = wcPubSub(subTopic, {}, 'sub', true);
       var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       logger.d('session $this $wcSessionSub');
       var ss = channel.stream.listen((message) {
@@ -407,11 +412,11 @@ class WCSession {
           logger.d('bad walletconnect request $err');
         }
       }, onError: (err, stack) {
-        logger.d('$this $err $stack');
+        logger.d('$this socket error, $err $stack');
       }, onDone: () {
         isConnected = false;
         logger.d('$this socket done, session active: $isActive');
-      });
+      }, cancelOnError: true);
       streamSubscription = ss;
       webSocketChannel = channel;
       channel.sink.add(jsonEncode(wcSessionSub));
@@ -437,17 +442,23 @@ class WCSession {
         sessionTopic: sessionTopic,
         ourPeerId: myPeerId,
         bridgeUrl: bridgeUrl,
+        chainId: chainId,
         logger: logger ?? Logger(printer: _loggerPrinter),
         eventHandler: jsonRpcHandler);
     var wcUri = WCUri(sessionTopic, wcVersion, bridgeUrl, keyHex);
 
-    await wcSession.connect();
-    return WCConnectionRequest(
-        wcUri: wcUri,
-        webSocketChannel: wcSession.webSocketChannel,
-        streamSubscription: wcSession.streamSubscription,
-        wcSessionRequest:
-            wcSession.sendSessionRequest(myMeta, timeoutSec: timeoutSec));
+    try {
+      await wcSession.connect();
+      return WCConnectionRequest(
+          wcUri: wcUri,
+          webSocketChannel: wcSession.webSocketChannel,
+          streamSubscription: wcSession.streamSubscription,
+          wcSessionRequest:
+              wcSession.sendSessionRequest(myMeta, timeoutSec: timeoutSec));
+    } catch (err, stack) {
+      wcSession.logger.d('create session error, $err, $stack');
+      return Future.error(err, stack);
+    }
   }
 
   static Future<Tuple2<WCSession, JsonRpc>> connectSession(String wcUrl,
@@ -471,9 +482,14 @@ class WCSession {
       sessionRequestCompleter.complete(Tuple2(wcSession, jsonRpc));
     }
 
-    await wcSession.connect(
-        topic: sessionTopic, sessionRequestHandler: handleSessionRequest);
-    return sessionRequestCompleter.future;
+    try {
+      await wcSession.connect(
+          topic: sessionTopic, sessionRequestHandler: handleSessionRequest);
+      return sessionRequestCompleter.future;
+    } catch (err, stack) {
+      wcSession.logger.d('connect session error, $err, $stack');
+      return Future.error(err, stack);
+    }
   }
 }
 
