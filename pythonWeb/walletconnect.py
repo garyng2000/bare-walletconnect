@@ -273,7 +273,7 @@ class WCSession:
         self.wsclient = wsclient = WebSocketClient()
         await wsclient.connect(wsurl)
         asyncio.create_task(wsclient.listen(ondata=ondata, ondone=ondone, onerror=onerror, cancel_onerror = True))
-        await wsclient.send_message(wwcsession_sub.to_json())
+        await wsclient.send_message(wcsession_sub.to_json())
         return self
 
     def __repr__(self):

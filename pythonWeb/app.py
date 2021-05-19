@@ -36,11 +36,11 @@ async def connect_wallet():
 def hello():
     """Renders a sample page."""
     worker_loop = asyncio.new_event_loop()
-    #asyncio.set_event_loop(worker_loop)
-    #loop = asyncio.get_event_loop()
-    #print(f'{loop}')
-    #loop.run_until_complete(connect_wallet())
-    asyncio.run(connect_dapp())
+    asyncio.set_event_loop(worker_loop)
+    loop = asyncio.get_event_loop()
+    print(f'{loop}')
+    loop.run_until_complete(connect_wallet())
+    #asyncio.run(connect_dapp())
     return "Hello World!"
 
 if __name__ == '__main__':
