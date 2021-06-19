@@ -12,7 +12,7 @@ void main() {
     var wcSession = sessionRequest.item1;
     var request = sessionRequest.item2;
     // ignore: omit_local_variable_types
-    List<String> accounts = [];
+    List<String> accounts = ['0x1234567890123456789012345678901234567890'];
     var myMeta = {
       'description': 'Testing DART Wallet',
       'name': 'test dart',
@@ -23,7 +23,8 @@ void main() {
     };
     print('session request from $request');
     var result = await wcSession.sendSessionRequestResponse(
-        request, 'my test wallet', myMeta, accounts, true);
+        request, 'my test wallet', myMeta, accounts, true,
+        chainId: 1, ssl: true, rpcUrl: 'https://infura.io');
     print('session request ${result.item1} approved $wcSession');
     await Future.delayed(Duration(seconds: 10), () {});
     var pong = await wcSession.sendRequest('wc_pong', []);
@@ -45,20 +46,26 @@ void main() {
           jsonRpcHandler: {
             '_': [echo_handler]
           },
-          chainId: 56);
+          chainId: 1);
       print(sessionRequest.wcUri);
       (querySelector('#wcUri') as InputElement).value =
           sessionRequest.wcUri.toString();
       (querySelector('#deepLink') as InputElement).value =
+//          sessionRequest.wcUri.universalLink('https://rnbwapp.com/');
+
           sessionRequest.wcUri.universalLink('https://metamask.app.link/');
       sessionRequest.wcUri.toString();
       var wcSession = await sessionRequest.wcSessionRequest;
       print('session request replied $wcSession');
       await wcSession.close();
-      await Future.delayed(Duration(seconds: 20), () {});
+      await Future.delayed(Duration(seconds: 60), () {});
       await wcSession.connect();
+      print('reconnect');
       var params = [];
-      await wcSession.sendRequest('eth_chainId', params);
+      var x = await wcSession.sendRequest('eth_accounts', params);
+      print('eth_accounts sent $x');
+      var y = await x.item2;
+      print('eth_accounts result $y');
       // if (wcSession.isActive) {
       //   var ping = await wcSession.sendRequest('wc_ping', []);
       //   var id = ping.item1;

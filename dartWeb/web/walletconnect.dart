@@ -6,7 +6,9 @@ import 'package:encrypt/encrypt.dart';
 import 'package:logger/logger.dart';
 import 'package:tuple/tuple.dart';
 import 'package:uuid/uuid.dart';
+import 'package:pedantic/pedantic.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+//import 'package:web_socket_channel/status.dart' as wsstatus;
 
 //import 'package:web_socket_channel/status.dart' as status;
 
@@ -183,6 +185,7 @@ class WCSession {
   String ourPeerId;
   bool isConnected = false;
   bool isActive = false;
+  bool isVoluntaryClose = false;
   Map<int, Tuple2<JsonRpc, Completer<dynamic>>> outstandingRpc = {};
   Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> eventHandler = {};
   int theirChainId;
@@ -193,7 +196,11 @@ class WCSession {
   Map<String, dynamic> theirMeta;
 
   Future<dynamic> timeoutAfter({int sec, Function() onTimeout}) async {
-    return Future.delayed(Duration(seconds: sec), onTimeout);
+    if (sec <= 0) {
+      return Future.delayed(Duration(milliseconds: 1), onTimeout);
+    } else {
+      return Future.delayed(Duration(seconds: sec), onTimeout);
+    }
   }
 
   Future<Tuple2<int, Future<dynamic>>> sendRequest(method, params,
@@ -201,7 +208,7 @@ class WCSession {
     if (!isConnected && method != 'wc_sessionRequest') {
       if (isActive) {
         logger.d('reconnect $this');
-        await connect();
+        unawaited(connect());
       } else {
         return Future.error('invalid session');
       }
@@ -308,14 +315,26 @@ class WCSession {
 
   Future<dynamic> close() async {
     isConnected = false;
+    isVoluntaryClose = true;
+    logger.d('closing socket');
+    // var y = await webSocketChannel.sink.close(
+    //     wsstatus.normalClosure,
+    //     isActive
+    //         ? 'socket released session still active'
+    //         : 'session destroyed from local');
+    // logger.d('socket closed $y');
+    // return y;
     return timeoutAfter(
         sec: 0,
         onTimeout: () async {
-          return await webSocketChannel.sink.close(
-              1000,
+          await streamSubscription.cancel();
+          var x = await webSocketChannel.sink.close(
+              1000, // only 1000 or >=3000 and <= 3999 is allowed!
               isActive
                   ? 'socket released session still active'
                   : 'session destroyed from local');
+          logger.d('socket closed $x');
+          return x;
         });
   }
 
@@ -367,12 +386,15 @@ class WCSession {
       {String topic,
       void Function(WCSession, JsonRpc) sessionRequestHandler}) async {
     try {
+      isVoluntaryClose = false;
       var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
       var subTopic = topic ?? ourPeerId;
       var wcSessionSub = wcPubSub(subTopic, {}, 'sub', true);
       var channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       logger.d('session $this $wcSessionSub');
       var ss = channel.stream.listen((message) {
+        if (channel != webSocketChannel) return;
+
         try {
           var jsonRpc = wcDecodePubSubMessage(message, keyHex);
           var method = jsonRpc.method;
@@ -415,7 +437,16 @@ class WCSession {
         logger.d('$this socket error, $err $stack');
       }, onDone: () {
         isConnected = false;
-        logger.d('$this socket done, session active: $isActive');
+        logger.d(
+            '$this socket done, session active: $isActive voluntary close: $isVoluntaryClose');
+        if (!isVoluntaryClose) {
+          logger.d('$this re-connect');
+          timeoutAfter(
+              sec: 10,
+              onTimeout: () async {
+                unawaited(connect());
+              });
+        }
       }, cancelOnError: true);
       streamSubscription = ss;
       webSocketChannel = channel;
@@ -536,6 +567,7 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
   var handled = false;
   var hasHandler = false;
   var logger = wcSession.logger;
+  logger.d('processing message $jsonRpc');
   if (method != null) {
     if (wcSession.eventHandler != null) {
       var handlers = wcSession.eventHandler.containsKey(method)
@@ -576,6 +608,7 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
       wcSession.sendResponse(jsonRpc.id, jsonRpc.method, error: errorResponse);
     }
   } else if (result != null || error != null) {
+    logger.d('outstanding rpc ${wcSession.outstandingRpc}');
     if (wcSession.outstandingRpc.containsKey(id)) {
       var request = wcSession.outstandingRpc[id].item1;
       var completer = wcSession.outstandingRpc[id].item2;
