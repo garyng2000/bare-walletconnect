@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="description" content="Web site created using create-react-app" />
+
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="Tue, 01 Jan 1980 1:00:00 GMT" />
+
+  <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+  <!--
+      manifest.json provides metadata used when your web app is installed on a
+      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
+    -->
+  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  <!--
+      Notice the use of %PUBLIC_URL% in the tags above.
+      It will be replaced with the URL of the `public` folder during the build.
+      Only files inside the `public` folder can be referenced from the HTML.
+
+      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
+      work correctly both with client-side routing and a non-root public URL.
+      Learn how to configure a non-root public URL by running `npm run build`.
+    -->
+  <title>React App</title>
+</head>
+
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <div id="root"></div>
+  <!--
+      This HTML file is a template.
+      If you open it directly in the browser, you will see an empty page.
+
+      You can add webfonts, meta tags, or analytics to this file.
+      The build step will place the bundled scripts into the <body> tag.
+
+      To begin the development, run `npm start` or `yarn start`.
+      To create a production bundle, use `npm run build` or `yarn build`.
+    -->
+</body>
+<script>
+
+  var container = window.parent || window.opener;
+  var isEmbedded = container !== window;
+
+  var outstandingRpc = {
+
+  };
+
+  function jsonRpcResult(something) {
+    const { id, result, error } = something || {};
+    const wc_apiService = window.wc_apiService;
+    const pendingCall = outstandingRpc[id];
+    const { method } = pendingCall || {};
+    console.log('returning result', pendingCall, something);
+    if (method === 'session_request') {
+      const { approved } = result || {};
+      if (approved) {
+        wc_apiService.approveSession(result);
+      }
+      else {
+        wc_apiService.rejectSession(result);
+      }
+      delete outstandingRpc[id];
+    }
+    else if (id) {
+      if (!error) {
+        wc_apiService.approveRequest(something);
+      }
+      else {
+        wc_apiService.rejectRequest(something);
+      }
+    }
+    if (id && pendingCall) {
+      delete outstandingRpc[id];
+    }
+  }
+
+  function jsonRpcCall(something, sender) {
+    console.log('jsonrpc call', something);
+    const wc_apiService = window.wc_apiService;
+    const message_target = 'webview_container'
+    const { id, method, params } = something || {};
+    if (/^wc_|^eth_/.test(method)) {
+      if (method == 'wc_create_session') {
+        const opts = {
+          bridge: params[0],
+          clientMeta: params[1],
+          id: id,
+        }
+        wc_apiService.connect(opts);
+      }
+      else if (method == 'wc_connect') {
+        const opts = {
+          uri: params[0],
+          clientMeta: params[1],
+          id: id,
+        }
+        wc_apiService.connect(opts);
+      }
+      else if (method == 'wc_reconnect') {
+        const opts = {
+          session: params[0],
+          id: id,
+        }
+        wc_apiService.connect(opts);
+      }
+      else if (method) {
+        wc_apiService.sendRequest(something)
+          .then(result => {
+            relayMessageToContainer({
+              target: message_target,
+              jsonrpc: result,
+            }, sender);
+          })
+          .catch(error => {
+            relayMessageToContainer({
+              target: message_target,
+              jsonrpc: error,
+            }, sender);
+          })
+      }
+    }
+  }
+
+  function receiveMessage(event) {
+    //console.log(event);
+    if (event.data) {
+      var dataObject = event.data || {};
+      var sourceWindow = event.source;
+      var origin = event.origin;
+      //console.log(dataObject);
+      var { target, jsonrpc } = dataObject;
+      if (jsonrpc
+        && target === 'iframe_webview'
+        && sourceWindow === container
+      ) {
+        const { id, method, params, result, error } = jsonrpc || {};
+        if (method) {
+          jsonRpcCall(jsonrpc, sourceWindow);
+        }
+        else if (id && (error || result)) {
+          jsonRpcResult(jsonrpc);
+        }
+      }
+    }
+  }
+
+  function relayMessageToContainer(message, sender) {
+    if (isEmbedded) {
+      (sender || container).postMessage(message, "*");
+    }
+    else {
+      console.log('nothing to relay for self ', message);
+    }
+  }
+  function wc_event(event) {
+    console.log(event);
+    const { eventName, payload } = event.detail;
+    const sender = outstandingRpc[payload.id];
+    const message_target = 'webview_container'
+    if (eventName == 'display_uri') {
+      relayMessageToContainer({
+        target: message_target,
+        jsonrpc: { id: payload.id, method: 'display_uri', params: [payload] }
+      }, sender);
+    }
+    else if (eventName == 'undisplay_uri') {
+      relayMessageToContainer({
+        target: message_target,
+        jsonrpc: { id: payload.id, method: 'undisplay_uri', params: [payload] }
+      });
+    }
+    else if (eventName == 'connect') {
+      relayMessageToContainer({
+        target: message_target,
+        jsonrpc: { id: payload.id, result: payload }
+      }, sender);
+    }
+    else if (eventName == 'session_request') {
+      // two step we response for the initial(retrieve session request) then register the remote session request as outstanding
+      outstandingRpc[payload.result.id] = payload.result;
+      relayMessageToContainer({
+        target: message_target,
+        jsonrpc: payload,
+      });
+    }
+    else if (eventName == 'transport_error') {
+      relayMessageToContainer({
+        target: message_target,
+        jsonrpc: {
+          method:'transport_error',
+          params:[],
+        },
+      });
+    }
+    else if (eventName == 'call_request') {
+      const jsonrpc = payload;
+      const { id, method } = jsonrpc || {};
+      if (method) {
+        if (id) {
+          outstandingRpc[id] = jsonrpc;
+        }
+
+        relayMessageToContainer({
+          target: message_target,
+          jsonrpc: jsonrpc,
+        });
+
+      }
+    }
+  }
+
+  if (!window.listenerAdded) {
+    window.addEventListener("message", receiveMessage, false);
+    window.addEventListener("wc_event", wc_event, false);
+    listenerAdded = true;
+  }
+
+</script>
+
+</html>
