@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer';
 import 'package:convert/convert.dart';
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart';
@@ -26,7 +25,7 @@ var _loggerPrinter = PrettyPrinter(
 
 class WCCustomException implements Exception {
   JsonRpc request;
-  JsonRpc result;
+  JsonRpc? result;
   dynamic error;
   dynamic cause;
   String errorType;
@@ -66,8 +65,8 @@ class WCUri {
     var rx = RegExp(r'wc:([^@]+)@(\d+)\?bridge=([^&]+)&key=([0-9a-fA-F]+)');
     var match = rx.firstMatch(wcUrl.trim());
     if (match != null) {
-      return WCUri(match.group(1), int.parse(match.group(2)),
-          Uri.decodeFull(match.group(3)), match.group(4));
+      return WCUri(match.group(1)!, int.parse(match.group(2)!),
+          Uri.decodeFull(match.group(3)!), match.group(4)!);
     } else {
       throw ('malformed walletconnect uri');
     }
@@ -79,11 +78,11 @@ class JsonRpc {
 
   int id;
   String jsonrpc = '2.0';
-  String method;
-  List<dynamic> params;
-  Map<String, dynamic> result;
-  Map<String, dynamic> error;
-  Completer completer;
+  String? method;
+  List<dynamic>? params;
+  Map<String, dynamic>? result;
+  Map<String, dynamic>? error;
+  Completer? completer;
   factory JsonRpc.fromJson(Map<String, dynamic> jsonRpcObj) {
     return JsonRpc(jsonRpcObj['id'],
         method: jsonRpcObj['method'],
@@ -109,7 +108,7 @@ class JsonRpc {
 }
 
 class WCPubSub {
-  WCPubSub({this.topic, this.type, this.payload, this.silent});
+  WCPubSub({required this.topic, required this.type, required this.payload, required this.silent});
 
   String topic;
   String type;
@@ -131,7 +130,7 @@ class WCPubSub {
 }
 
 class WCPayload {
-  WCPayload({this.data, this.hmac, this.iv});
+  WCPayload({required this.data, required this.hmac, required this.iv});
 
   String data;
   String hmac;
@@ -147,16 +146,16 @@ class WCPayload {
 
 class WCConnectionRequest {
   WCConnectionRequest(
-      {this.wcUri,
-      this.webSocketChannel,
-      this.streamSubscription,
-      this.requestResponse,
-      this.wcSessionRequest});
+      {required this.wcUri,
+        required this.webSocketChannel,
+        required this.streamSubscription,
+        this.requestResponse,
+        required this.wcSessionRequest});
 
-  WebSocketChannel webSocketChannel;
-  StreamSubscription<dynamic> streamSubscription;
+  WebSocketChannel? webSocketChannel;
+  StreamSubscription<dynamic>? streamSubscription;
   Future<WCSession> wcSessionRequest;
-  Future<dynamic> requestResponse;
+  Future<dynamic>? requestResponse;
   WCUri wcUri;
 }
 
@@ -170,17 +169,17 @@ WCPubSub wcPubSub(topicId, payload, type, isSilent) {
 
 class WCSession {
   WCSession(
-      {this.sessionTopic,
-      this.webSocketChannel,
-      this.keyHex,
-      this.ourPeerId,
-      this.logger,
-      this.eventHandler,
-      this.chainId,
-      this.bridgeUrl});
+      {required this.sessionTopic,
+        this.webSocketChannel,
+        required this.keyHex,
+        required this.ourPeerId,
+        required this.logger,
+        required this.eventHandler,
+        this.chainId,
+        required this.bridgeUrl});
 
-  WebSocketChannel webSocketChannel;
-  StreamSubscription<dynamic> streamSubscription;
+  WebSocketChannel? webSocketChannel;
+  StreamSubscription<dynamic>? streamSubscription;
   Logger logger;
   String bridgeUrl;
   String sessionTopic;
@@ -190,15 +189,15 @@ class WCSession {
   bool isActive = false;
   bool isVoluntaryClose = false;
   Map<int, Tuple2<JsonRpc, Completer<dynamic>>> outstandingRpc = {};
-  Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> eventHandler = {};
-  int theirChainId;
-  List<dynamic> theirAccounts;
-  int chainId;
-  String theirRpcUrl;
-  String theirPeerId;
-  Map<String, dynamic> theirMeta;
+  Map<String, List<JsonRpc Function(WCSession, JsonRpc)>>? eventHandler = {};
+  int? theirChainId;
+  List<dynamic>? theirAccounts;
+  int? chainId;
+  String? theirRpcUrl;
+  String? theirPeerId;
+  Map<String, dynamic>? theirMeta;
 
-  Future<dynamic> timeoutAfter({int sec, Function() onTimeout}) async {
+  Future<dynamic> timeoutAfter({required int sec, required Function() onTimeout}) async {
     if (sec <= 0) {
       return Future.delayed(Duration(milliseconds: 1), onTimeout);
     } else {
@@ -207,7 +206,7 @@ class WCSession {
   }
 
   Future<Tuple2<int, Future<dynamic>>> sendRequest(method, params,
-      {peerId, int timeoutSec}) async {
+      {peerId, int? timeoutSec}) async {
     if (!isConnected && method != 'wc_sessionRequest') {
       if (isActive) {
         logger.d('reconnect $this');
@@ -226,29 +225,29 @@ class WCSession {
     if (method != 'wc_sessionUpdate') {
       outstandingRpc[id] = Tuple2(jsonRpc, completer);
     }
-    webSocketChannel.sink.add(jsonEncode(wcRequestPub));
+    webSocketChannel!.sink.add(jsonEncode(wcRequestPub));
     return Tuple2(
         id,
         ((timeoutSec ?? 0) <= 0
             ? completer.future
             : Future.any([
-                method == 'wc_sessionUpdate'
-                    ? Future.value(Tuple2(jsonRpc, responseJsonRpc))
-                    : completer.future,
-                timeoutAfter(
-                  sec: timeoutSec,
-                  onTimeout: () {
-                    try {
-                      outstandingRpc.remove(id);
-                      // ignore: empty_catches
-                    } catch (e) {}
-                    return Future.error(WCCustomException(jsonRpc, 'timeout',
-                        error: {
-                          'message': 'no response after ${timeoutSec}s'
-                        }));
-                  },
-                )
-              ])));
+          method == 'wc_sessionUpdate'
+              ? Future.value(Tuple2(jsonRpc, responseJsonRpc))
+              : completer.future,
+          timeoutAfter(
+            sec: timeoutSec!,
+            onTimeout: () {
+              try {
+                outstandingRpc.remove(id);
+                // ignore: empty_catches
+              } catch (e) {}
+              return Future.error(WCCustomException(jsonRpc, 'timeout',
+                  error: {
+                    'message': 'no response after ${timeoutSec}s'
+                  }));
+            },
+          )
+        ])));
   }
 
   Future<Tuple2<int, Future<dynamic>>> sendResponse(id, method,
@@ -263,11 +262,11 @@ class WCSession {
     var ivHex = IV.fromSecureRandom(16).base16;
     var wcRequest = wcEncrypt(jsonEncode(jsonRpc), keyHex, ivHex);
     var wcRequestPub = wcPubSub(theirPeerId, wcRequest, 'pub', true);
-    webSocketChannel.sink.add(jsonEncode(wcRequestPub));
+    webSocketChannel!.sink.add(jsonEncode(wcRequestPub));
     return Tuple2(id, Future.value(true));
   }
 
-  Future<WCSession> sendSessionRequest(myMeta, {int timeoutSec}) async {
+  Future<WCSession> sendSessionRequest(myMeta, {int? timeoutSec}) async {
     var wcSessionRequestParams = [
       {'peerId': ourPeerId, 'peerMeta': myMeta, 'chainId': chainId}
     ];
@@ -287,9 +286,9 @@ class WCSession {
       Map<String, dynamic> myMeta,
       List<String> accounts,
       bool approved,
-      {String rpcUrl,
-      int chainId,
-      bool ssl = true}) {
+      {required String rpcUrl,
+        required int chainId,
+        bool ssl = true}) {
     var wcSessionRequestResult = {
       'approved': approved,
       'accounts': accounts,
@@ -308,7 +307,7 @@ class WCSession {
         isConnected = true;
         isActive = true;
         var wcRequestSub = wcPubSub(ourPeerId, {}, 'sub', true);
-        webSocketChannel.sink.add(jsonEncode(wcRequestSub));
+        webSocketChannel!.sink.add(jsonEncode(wcRequestSub));
       }
       return response;
     } catch (err) {
@@ -330,8 +329,8 @@ class WCSession {
     return timeoutAfter(
         sec: 0,
         onTimeout: () async {
-          await streamSubscription.cancel();
-          var x = await webSocketChannel.sink.close(
+          await streamSubscription!.cancel();
+          var x = await webSocketChannel!.sink.close(
               1000, // only 1000 or >=3000 and <= 3999 is allowed!
               isActive
                   ? 'socket released session still active'
@@ -358,14 +357,14 @@ class WCSession {
 
   void setEventHandler(method, handler, {remove = false}) {
     eventHandler ??= {};
-    if (!eventHandler.containsKey(method)) {
-      eventHandler[method] = [];
+    if (!eventHandler!.containsKey(method)) {
+      eventHandler![method] = [];
     }
-    var handlers = eventHandler[method];
+    var handlers = eventHandler![method];
     if (!remove) {
-      handlers.contains(handler) ?? handlers.add(handler);
+      handlers!.contains(handler) ?? handlers.add(handler);
     } else {
-      handlers.contains(handler) ?? handlers.remove(handler);
+      handlers!.contains(handler) ?? handlers.remove(handler);
     }
   }
 
@@ -386,8 +385,8 @@ class WCSession {
   }
 
   Future<WCSession> connect(
-      {String topic,
-      void Function(WCSession, JsonRpc) sessionRequestHandler}) async {
+      {String? topic,
+        void Function(WCSession, JsonRpc)? sessionRequestHandler}) async {
     try {
       isVoluntaryClose = false;
       var wsUrl = bridgeUrl.replaceFirst(RegExp(r'^http'), 'ws');
@@ -429,8 +428,8 @@ class WCSession {
 
           if (method != 'wc_sessionRequest' ||
               (eventHandler != null &&
-                  eventHandler.containsKey('wc_sessionRequest') &&
-                  eventHandler['wc_sessionRequest'].isNotEmpty)) {
+                  eventHandler!.containsKey('wc_sessionRequest') &&
+                  eventHandler!['wc_sessionRequest']!.isNotEmpty)) {
             processMessage(this, jsonRpc);
           }
         } catch (err) {
@@ -462,10 +461,10 @@ class WCSession {
 
   static Future<WCConnectionRequest> createSession(
       String bridgeUrl, Map<String, dynamic> myMeta,
-      {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
-      Logger logger,
-      int chainId,
-      int timeoutSec}) async {
+      {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>>? jsonRpcHandler,
+        Logger? logger,
+        int? chainId,
+        int? timeoutSec}) async {
     var uuidGenerator = Uuid();
     var sessionTopic = uuidGenerator.v4();
     var myPeerId = uuidGenerator.v4();
@@ -488,7 +487,7 @@ class WCSession {
           webSocketChannel: wcSession.webSocketChannel,
           streamSubscription: wcSession.streamSubscription,
           wcSessionRequest:
-              wcSession.sendSessionRequest(myMeta, timeoutSec: timeoutSec));
+          wcSession.sendSessionRequest(myMeta, timeoutSec: timeoutSec));
     } catch (err, stack) {
       wcSession.logger.d('create session error, $err, $stack');
       return Future.error(err, stack);
@@ -496,8 +495,8 @@ class WCSession {
   }
 
   static Future<Tuple2<WCSession, JsonRpc>> connectSession(String wcUrl,
-      {Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
-      Logger logger}) async {
+      {required Map<String, List<JsonRpc Function(WCSession, JsonRpc)>> jsonRpcHandler,
+        Logger? logger}) async {
     var uuidGenerator = Uuid();
     var wcUri = WCUri.fromString(wcUrl);
     var bridgeUrl = wcUri.bridgeUrl.trim();
@@ -573,10 +572,10 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
   logger.d('processing message $jsonRpc');
   if (method != null) {
     if (wcSession.eventHandler != null) {
-      var handlers = wcSession.eventHandler.containsKey(method)
-          ? wcSession.eventHandler[method]
+      var handlers = wcSession.eventHandler!.containsKey(method)
+          ? wcSession.eventHandler![method]
           : [];
-      for (var handler in handlers) {
+      for (var handler in handlers!) {
         try {
           hasHandler = true;
           handler(wcSession, jsonRpc);
@@ -587,9 +586,9 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
         }
       }
     }
-    if (!handled && !hasHandler && wcSession.eventHandler.containsKey('_')) {
-      var handlers = wcSession.eventHandler['_'];
-      for (var handler in handlers) {
+    if (!handled && !hasHandler && wcSession.eventHandler!.containsKey('_')) {
+      var handlers = wcSession.eventHandler!['_'];
+      for (var handler in handlers!) {
         try {
           handler(wcSession, jsonRpc);
           handled = true;
@@ -605,7 +604,7 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
         'error': {
           'code': internalErr != null ? -32063 : -32601,
           'message':
-              internalErr != null ? internalErr.toString() : 'method not found'
+          internalErr != null ? internalErr.toString() : 'method not found'
         }
       };
       wcSession.sendResponse(jsonRpc.id, jsonRpc.method, error: errorResponse);
@@ -613,8 +612,8 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
   } else if (result != null || error != null) {
     logger.d('outstanding rpc ${wcSession.outstandingRpc}');
     if (wcSession.outstandingRpc.containsKey(id)) {
-      var request = wcSession.outstandingRpc[id].item1;
-      var completer = wcSession.outstandingRpc[id].item2;
+      var request = wcSession.outstandingRpc[id]!.item1;
+      var completer = wcSession.outstandingRpc[id]!.item2;
       wcSession.outstandingRpc.remove(id);
       if (request.method == 'wc_sessionRequest') {
         if (result != null) {
@@ -671,12 +670,12 @@ const String WCRegistry = 'https://registry.walletconnect.org';
 
 class WCAppRegistryEntry {
   WCAppRegistryEntry(
-      {this.id,
-      this.name,
-      this.homepage,
-      this.app,
-      this.mobile,
-      this.desktop,
+      {required this.id,
+      required this.name,
+      required this.homepage,
+      required this.app,
+      required this.mobile,
+      required this.desktop,
       this.metadata});
   String id;
   String name;
@@ -713,7 +712,7 @@ class WCAppRegistryEntry {
 }
 
 class WCAppRegistry {
-  Map<String, WCAppRegistryEntry> entries;
+  late Map<String, WCAppRegistryEntry> entries;
   WCAppRegistry(Map<String, dynamic> jsonObj) {
     entries = <String, WCAppRegistryEntry>{};
     jsonObj.keys.forEach((k) {
@@ -748,9 +747,9 @@ Future<List<WCAppRegistryEntry>> getWCWalletRegistry({bool ios = true}) async {
 
   var iosWallets = xx.entries.keys
       .where((k) =>
-          !(xx.entries[k].app['ios']?.isEmpty ?? true) &&
-          (!(xx.entries[k].mobile['native']?.isEmpty ?? true) ||
-              !(xx.entries[k].mobile['universal']?.isEmpty ?? true)))
+          !(xx.entries[k]!.app['ios']?.isEmpty ?? true) &&
+          (!(xx.entries[k]!.mobile['native']?.isEmpty ?? true) ||
+              !(xx.entries[k]!.mobile['universal']?.isEmpty ?? true)))
       .map((k) => xx.entries[k]);
 
   var androidWallets = xx.entries.keys
