@@ -2,11 +2,11 @@ import 'dart:html';
 import 'walletconnect.dart';
 
 void main() {
-  querySelector('#output').text = 'Your Dart app is running.';
-  querySelector('#connectDApp').onClick.listen((event) async {
+  querySelector('#output')!.text = 'Your Dart app is running.';
+  querySelector('#connectDApp')!.onClick.listen((event) async {
     print('wallet connect invoked');
     var wcUri = (querySelector('#wcUri') as InputElement).value;
-    var sessionRequest = await WCSession.connectSession(wcUri, jsonRpcHandler: {
+    var sessionRequest = await WCSession.connectSession(wcUri!, jsonRpcHandler: {
       '_': [echo_handler]
     });
     var wcSession = sessionRequest.item1;
@@ -33,7 +33,7 @@ void main() {
     var requestResult = await pong.item2;
     print('wc_pong $id result $requestResult');
   });
-  querySelector('#connectWallet').onClick.listen((event) async {
+  querySelector('#connectWallet')!.onClick.listen((event) async {
     var iosWalletRegistry = await getWCWalletRegistry();
     var androidWalletRegistry = await getWCWalletRegistry(ios: false);
     iosWalletRegistry.forEach((w) {
@@ -47,7 +47,7 @@ void main() {
       'icons': ['https://blabla.com/favicon.png']
     };
     try {
-      var sessionRequest = await WCSession.createSession(bridgeUrl, myMeta,
+      var sessionRequest = await WCSession.createSession(bridgeUrl!, myMeta,
           jsonRpcHandler: {
             '_': [echo_handler]
           },
