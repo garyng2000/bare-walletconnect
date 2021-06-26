@@ -81,7 +81,8 @@ class JsonRpc {
   String jsonrpc = '2.0';
   String method;
   List<dynamic> params;
-  Map<String, dynamic> result;
+  //Map<String, dynamic> result;
+  dynamic result;
   Map<String, dynamic> error;
   Completer completer;
   factory JsonRpc.fromJson(Map<String, dynamic> jsonRpcObj) {

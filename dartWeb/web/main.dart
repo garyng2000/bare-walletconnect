@@ -63,14 +63,38 @@ void main() {
       var wcSession = await sessionRequest.wcSessionRequest;
       print('session request replied $wcSession');
       await wcSession.close();
-      await Future.delayed(Duration(seconds: 60), () {});
+      await Future.delayed(Duration(seconds: 300), () {});
       await wcSession.connect();
       print('reconnect');
-      var params = [];
-      var x = await wcSession.sendRequest('eth_accounts', params);
-      print('eth_accounts sent $x');
-      var y = await x.item2;
-      print('eth_accounts result $y');
+      var GWei = BigInt.from(1000000000);
+      var params = [
+        {
+          'from': wcSession.theirAccounts[0],
+          'to': wcSession.theirAccounts[0],
+          'data': '0x',
+          'gas': '0x' + 21000.toRadixString(16),
+          'gasPrice': '0x' + (GWei * BigInt.from(2)).toRadixString(16),
+//          'value': '0x0',
+          'value': '0x' + (GWei * GWei ~/ BigInt.from(1000)).toRadixString(16),
+//          'nonce': '0x4',
+        }
+      ];
+      try {
+        var x = await wcSession.sendRequest('eth_sendTransaction', params);
+        print('eth_sendTransaction sent $x');
+        var y = await x.item2;
+        print('eth_sendTransaction result $y');
+      } catch (error) {
+        print('eth_sendTransaction failed $error');
+      }
+      params = [
+        {
+          'approved': false,
+        }
+      ];
+      var x = await wcSession.sendRequest('wc_sessionUpdate', params);
+      print('wc_sessionUpdate sent $x');
+
       // if (wcSession.isActive) {
       //   var ping = await wcSession.sendRequest('wc_ping', []);
       //   var id = ping.item1;
