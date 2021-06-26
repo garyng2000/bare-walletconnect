@@ -10,6 +10,7 @@ dependencies:
   convert: '>=1.0.0'
   crypto: '>=2.0.0'
   encrypt: '>=4.0.0'
+  http: '>=0.13.3'
   logger: '>=1.0.0'
   tuple: '>=1.0.0'
   uuid: '>=2.0.0'

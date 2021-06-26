@@ -34,6 +34,11 @@ void main() {
     print('wc_pong $id result $requestResult');
   });
   querySelector('#connectWallet').onClick.listen((event) async {
+    var iosWalletRegistry = await getWCWalletRegistry();
+    var androidWalletRegistry = await getWCWalletRegistry(ios: false);
+    iosWalletRegistry.forEach((w) {
+      print('${w.name} - ${w.iosDeepLink}');
+    });
     var bridgeUrl = (querySelector('#bridgeUrl') as InputElement).value;
     var myMeta = {
       'description': 'Testing DART DApp',

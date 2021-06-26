@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer';
 import 'package:convert/convert.dart';
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart';
@@ -8,6 +9,8 @@ import 'package:tuple/tuple.dart';
 import 'package:uuid/uuid.dart';
 import 'package:pedantic/pedantic.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:http/http.dart' as http;
+
 //import 'package:web_socket_channel/status.dart' as wsstatus;
 
 //import 'package:web_socket_channel/status.dart' as status;
@@ -662,4 +665,97 @@ JsonRpc echo_handler(WCSession wcSession, JsonRpc jsonRpc) {
     logger.d('should not be here either, $error');
   }
   return JsonRpc(id, result: {});
+}
+
+const String WCRegistry = 'https://registry.walletconnect.org';
+
+class WCAppRegistryEntry {
+  WCAppRegistryEntry(
+      {this.id,
+      this.name,
+      this.homepage,
+      this.app,
+      this.mobile,
+      this.desktop,
+      this.metadata});
+  String id;
+  String name;
+  String homepage;
+  Map<String, dynamic> app;
+  Map<String, dynamic> mobile;
+  Map<String, dynamic> desktop;
+  dynamic metadata;
+
+  factory WCAppRegistryEntry.fromJson(Map<String, dynamic> jsonObj) {
+    return WCAppRegistryEntry(
+        id: jsonObj['id'],
+        name: jsonObj['name'],
+        homepage: jsonObj['homepage'],
+        app: jsonObj['app'],
+        mobile: jsonObj['mobile'],
+        desktop: jsonObj['desktop'],
+        metadata: jsonObj['metadata']);
+  }
+  String get logoUrl {
+    return getWCAppLogoUrl(id);
+  }
+
+  String get iosDeepLink {
+    return mobile['universal']?.isEmpty ?? true
+        ? mobile['native']
+        : mobile['universal'];
+  }
+
+  @override
+  String toString() {
+    return 'id: $id, name: $name, homepage: $homepage, app: $app, mobile: $mobile, desktop: $desktop, metadata: $metadata, logo: $logoUrl';
+  }
+}
+
+class WCAppRegistry {
+  Map<String, WCAppRegistryEntry> entries;
+  WCAppRegistry(Map<String, dynamic> jsonObj) {
+    entries = <String, WCAppRegistryEntry>{};
+    jsonObj.keys.forEach((k) {
+      var o = jsonObj[k];
+      entries[k] = WCAppRegistryEntry(
+          id: o['id'],
+          name: o['name'],
+          homepage: o['homepage'],
+          app: o['app'],
+          mobile: o['mobile'],
+          desktop: o['desktop'],
+          metadata: jsonObj['metadata']);
+    });
+  }
+  factory WCAppRegistry.fromJson(Map<String, dynamic> jsonObj) {
+    return WCAppRegistry(jsonObj);
+  }
+}
+
+String getWCAppLogoUrl(String appUuid) {
+  return WCRegistry + '/logo/sm/' + appUuid + '.jpeg';
+}
+
+Future<List<WCAppRegistryEntry>> getWCWalletRegistry({bool ios = true}) async {
+  const WALLET_REGISTRY = WCRegistry + '/data/wallets.json';
+  //const DAPP_REGISTRY = WCRegistry + '/data/dapps.json';
+
+  var url = Uri.parse(WALLET_REGISTRY);
+  var response = await http.get(url);
+  var content = jsonDecode(response.body);
+  var xx = WCAppRegistry.fromJson(content);
+
+  var iosWallets = xx.entries.keys
+      .where((k) =>
+          !(xx.entries[k].app['ios']?.isEmpty ?? true) &&
+          (!(xx.entries[k].mobile['native']?.isEmpty ?? true) ||
+              !(xx.entries[k].mobile['universal']?.isEmpty ?? true)))
+      .map((k) => xx.entries[k]);
+
+  var androidWallets = xx.entries.keys
+      .where((k) => !(xx.entries[k].app['android']?.isEmpty ?? true))
+      .map((k) => xx.entries[k]);
+  print(content);
+  return (ios ? iosWallets : androidWallets).toList();
 }
