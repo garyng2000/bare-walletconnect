@@ -338,6 +338,17 @@ class WCApiService {
     this.connector.rejectSession(sessionError);
   }
 
+  closeSession() {
+    const params = [{
+      approved: false,
+    }];
+    const jsonrpc = {
+      jsonrpc: '2.0',
+      method: 'wc_sessionUpdate',
+    }
+    return this.sendRequest(jsonrpc);
+  }
+  
   approveRequest(jsonRpcResult) {
     this.connector.approveRequest(jsonRpcResult);
   }
@@ -350,11 +361,29 @@ class WCApiService {
     return this.connector.unsafeSend(jsonRpc);
   }
 
-  sendTransaction(contractAddress, functionName, params) {
-  }
-
-  callFunction(contractAddress, functionName, params) {
-
+  static getWalletRegistry(registryRootUrl = 'https://registry.walletconnect.org', ios = true) {
+    const walletUrl = registryRootUrl + '/data/wallets.json';
+    return fetch(walletUrl)
+      .then(response => response.json())
+      .then(json => {
+        return json.keys
+          .filter(k => {
+            const e = json[k] || {};
+            return ((e['app'] || {})[ios ? 'ios' : 'android'])
+              &&
+              (!ios || ((e['mobile'] || {})['universal'] || (e['mobile'] || {})['native']));
+          })
+          .map(k => {
+            return {
+              ...json[k],
+              logoUrl: registryRootUrl + '/logo/sm/' + k + '.jpeg'
+            }
+          })
+      })
+      .catch(err => {
+        console.log(err, walletUrl);
+        return Promise.reject(err);
+      })
   }
 }
 
