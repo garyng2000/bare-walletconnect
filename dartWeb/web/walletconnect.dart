@@ -367,9 +367,9 @@ class WCSession {
     }
     var handlers = eventHandler![method];
     if (!remove) {
-      handlers!.contains(handler) ?? handlers.add(handler);
+      handlers?.add(handler);
     } else {
-      handlers!.contains(handler) ?? handlers.remove(handler);
+      handlers?.remove(handler);
     }
   }
 
@@ -619,7 +619,7 @@ void processMessage(WCSession wcSession, JsonRpc jsonRpc) {
     logger.d('outstanding rpc ${wcSession.outstandingRpc}');
     if (wcSession.outstandingRpc.containsKey(id)) {
       var request = wcSession.outstandingRpc[id]!.item1;
-      var completer = wcSession.outstandingRpc[id]!.item2;
+      var completer = wcSession.outstandingRpc[id]?.item2;
       wcSession.outstandingRpc.remove(id);
       if (request.method == 'wc_sessionRequest') {
         if (result != null) {
@@ -742,7 +742,7 @@ String getWCAppLogoUrl(String appUuid) {
   return WCRegistry + '/logo/sm/' + appUuid + '.jpeg';
 }
 
-Future<List<WCAppRegistryEntry>> getWCWalletRegistry({bool ios = true}) async {
+Future<List<WCAppRegistryEntry?>> getWCWalletRegistry({bool ios = true}) async {
   const WALLET_REGISTRY = WCRegistry + '/data/wallets.json';
   //const DAPP_REGISTRY = WCRegistry + '/data/dapps.json';
 
@@ -759,7 +759,7 @@ Future<List<WCAppRegistryEntry>> getWCWalletRegistry({bool ios = true}) async {
       .map((k) => xx.entries[k]);
 
   var androidWallets = xx.entries.keys
-      .where((k) => !(xx.entries[k].app['android']?.isEmpty ?? true))
+      .where((k) => !(xx.entries[k]?.app['android']?.isEmpty ?? true))
       .map((k) => xx.entries[k]);
   print(content);
   return (ios ? iosWallets : androidWallets).toList();

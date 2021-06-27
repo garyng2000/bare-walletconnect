@@ -6,7 +6,8 @@ void main() {
   querySelector('#connectDApp')!.onClick.listen((event) async {
     print('wallet connect invoked');
     var wcUri = (querySelector('#wcUri') as InputElement).value;
-    var sessionRequest = await WCSession.connectSession(wcUri!, jsonRpcHandler: {
+    var sessionRequest =
+        await WCSession.connectSession(wcUri!, jsonRpcHandler: {
       '_': [echo_handler]
     });
     var wcSession = sessionRequest.item1;
@@ -35,9 +36,9 @@ void main() {
   });
   querySelector('#connectWallet')!.onClick.listen((event) async {
     var iosWalletRegistry = await getWCWalletRegistry();
-    var androidWalletRegistry = await getWCWalletRegistry(ios: false);
+    //var androidWalletRegistry = await getWCWalletRegistry(ios: false);
     iosWalletRegistry.forEach((w) {
-      print('${w.name} - ${w.iosDeepLink}');
+      print('${w?.name} - ${w?.iosDeepLink}');
     });
     var bridgeUrl = (querySelector('#bridgeUrl') as InputElement).value;
     var myMeta = {
@@ -69,8 +70,8 @@ void main() {
       var GWei = BigInt.from(1000000000);
       var params = [
         {
-          'from': wcSession.theirAccounts[0],
-          'to': wcSession.theirAccounts[0],
+          'from': wcSession.theirAccounts![0],
+          'to': wcSession.theirAccounts![0],
           'data': '0x',
           'gas': '0x' + 21000.toRadixString(16),
           'gasPrice': '0x' + (GWei * BigInt.from(2)).toRadixString(16),
