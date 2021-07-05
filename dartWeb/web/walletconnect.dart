@@ -47,18 +47,23 @@ class WCUri {
     return 'wc:$topic@$version?bridge=$encodedBridgeUrl&key=$keyHex';
   }
 
-  String universalLink(appLink) {
+  String incompleteUrl() {
+    // for mobile task switch after sending request
+    return 'wc:$topic@$version';
+  }
+
+  String universalLink(appLink, {full = true}) {
     return appLink +
         (appLink.endsWith('/') ? '' : '/') +
         'wc?uri=' +
-        Uri.encodeComponent(toString(encode: true));
+        Uri.encodeComponent(full ? toString(encode: true) : incompleteUrl());
   }
 
-  String deepLink(String appLink) {
+  String deepLink(String appLink, {full = true}) {
     return appLink +
         (appLink.endsWith(':') ? '//' : (appLink.endsWith('/') ? '' : '/')) +
         'wc?uri=' +
-        Uri.encodeComponent(toString(encode: true));
+        Uri.encodeComponent(full ? toString(encode: true) : incompleteUrl());
   }
 
   static WCUri fromString(String wcUrl) {
