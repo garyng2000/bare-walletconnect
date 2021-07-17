@@ -1,5 +1,6 @@
 import 'dart:html';
 import 'walletconnect.dart';
+import 'web3.dart';
 
 void main() {
   querySelector('#output')!.text = 'Your Dart app is running.';
@@ -35,6 +36,14 @@ void main() {
     print('wc_pong $id result $requestResult');
   });
   querySelector('#connectWallet')!.onClick.listen((event) async {
+    var symbol = await getSymbol('http://localhost:8545');
+    print(symbol[0]);
+    var txData = mintTokenTx(
+        '0x3274e7409A257a8865f23Ade77A1827e69d923a1', 'https://www.google.com');
+    print('${txData.item1}, ${txData.item2}');
+    var event = await getTokenId(
+        'http://localhost:8545', null, 'https://www.google.com');
+    print('$event');
     var iosWalletRegistry = await getWCWalletRegistry();
     //var androidWalletRegistry = await getWCWalletRegistry(ios: false);
     iosWalletRegistry.forEach((w) {
@@ -63,20 +72,25 @@ void main() {
       sessionRequest.wcUri.toString();
       var wcSession = await sessionRequest.wcSessionRequest;
       print('session request replied $wcSession');
-      await wcSession.close();
-      await Future.delayed(Duration(seconds: 300), () {});
-      await wcSession.connect();
-      print('reconnect');
+      // await wcSession.close();
+      // await Future.delayed(Duration(seconds: 300), () {});
+      // await wcSession.connect();
+      // print('reconnect');
       var GWei = BigInt.from(1000000000);
+      var mintTx =
+          mintTokenTx(wcSession.theirAccounts![0], 'https://www.google.com');
       var params = [
         {
           'from': wcSession.theirAccounts![0],
-          'to': wcSession.theirAccounts![0],
-          'data': '0x',
-          'gas': '0x' + 21000.toRadixString(16),
-          'gasPrice': '0x' + (GWei * BigInt.from(2)).toRadixString(16),
+//          'to': wcSession.theirAccounts![0],
+//          'data': '0x',
+//          'gas': '0x' + 21000.toRadixString(16),
+          'to': mintTx.item1,
+          'data': mintTx.item2,
+//          'gas': '0x' + 200000.toRadixString(16),
+//          'gasPrice': '0x' + (GWei * BigInt.from(2)).toRadixString(16),
 //          'value': '0x0',
-          'value': '0x' + (GWei * GWei ~/ BigInt.from(1000)).toRadixString(16),
+//          'value': '0x' + (GWei * GWei ~/ BigInt.from(1000)).toRadixString(16),
 //          'nonce': '0x4',
         }
       ];

@@ -15,6 +15,10 @@ dependencies:
   tuple: '>=1.0.0'
   uuid: '>=2.0.0'
   web_socket_channel: '>=1.0.0'
+  web3dart: 
+    path: '../../web3dart'
+dependency_overrides:
+  pointycastle: ^3.2.0-rc0
 
 dev_dependencies:
   build_runner: ^1.10.0
