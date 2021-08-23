@@ -5,12 +5,13 @@ import 'package:tuple/tuple.dart';
 //import 'package:web_socket_channel/io.dart';
 import 'erc721.dart';
 
-Tuple2<String, String> mintTokenTx(String mintTo, String tokenUri) {
+Tuple2<String, String> mintTokenTx(
+    String mintTo, String tokenUri, String offchainId) {
   var contractAbi = ContractAbi.fromJson(erc721Abi, 'L1ERC721');
   var contractAddress = EthereumAddress.fromHex(erc721Address);
   var contract = DeployedContract(contractAbi, contractAddress);
   var mintFunction = contract.function('mint');
-  var hash = bytesToHex(keccakUtf8(tokenUri));
+  var hash = bytesToHex(keccakUtf8(offchainId));
   print(hash);
   var params = [EthereumAddress.fromHex(mintTo), tokenUri, hexToInt(hash)];
   var txData = bytesToHex(mintFunction.encodeCall(params),
@@ -30,14 +31,14 @@ dynamic getSymbol(String rpcUrl) async {
   return result;
 }
 
-dynamic getTokenId(
-    String rpcUrl, String? walletAddress, String tokenUri) async {
+dynamic getTokenId(String rpcUrl, String? walletAddress, String tokenUri,
+    String offchainId) async {
   var contractAbi = ContractAbi.fromJson(erc721Abi, 'L1ERC721');
   var contractAddress = EthereumAddress.fromHex(erc721Address);
   var contract = DeployedContract(contractAbi, contractAddress);
   var client = Web3Client(rpcUrl, Client());
   var event = contract.event('Minted');
-  var hash = bytesToHex(keccakUtf8(tokenUri), include0x: true);
+  var hash = bytesToHex(keccakUtf8(offchainId), include0x: true);
   var filter = FilterOptions(
       address: contractAddress,
       fromBlock: BlockNum.genesis(),

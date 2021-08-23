@@ -23,10 +23,11 @@ void main() {
         'https://raw.githubusercontent.com/MetaMask/brand-resources/master/SVG/metamask-fox.svg'
       ]
     };
+    var wantedChainId = request.params![0]!['chainId'];
     print('session request from $request');
     var result = await wcSession.sendSessionRequestResponse(
         request, 'my test wallet', myMeta, accounts, true,
-        chainId: 1, ssl: true, rpcUrl: 'https://infura.io');
+        chainId: wantedChainId ?? 1, ssl: true, rpcUrl: 'https://infura.io');
     print('session request ${result.item1} approved $wcSession');
     await Future.delayed(Duration(seconds: 10), () {});
     var pong = await wcSession.sendRequest('wc_pong', []);
@@ -38,11 +39,11 @@ void main() {
   querySelector('#connectWallet')!.onClick.listen((event) async {
     var symbol = await getSymbol('http://localhost:8545');
     print(symbol[0]);
-    var txData = mintTokenTx(
-        '0x3274e7409A257a8865f23Ade77A1827e69d923a1', 'https://www.google.com');
+    var txData = mintTokenTx('0x3274e7409A257a8865f23Ade77A1827e69d923a1',
+        'https://www.google.com', 'https://www.google.com');
     print('${txData.item1}, ${txData.item2}');
-    var event = await getTokenId(
-        'http://localhost:8545', null, 'https://www.google.com');
+    var event = await getTokenId('http://localhost:8545', null,
+        'https://www.google.com', 'https://www.google.com');
     print('$event');
     var iosWalletRegistry = await getWCWalletRegistry();
     //var androidWalletRegistry = await getWCWalletRegistry(ios: false);
@@ -77,8 +78,8 @@ void main() {
       // await wcSession.connect();
       // print('reconnect');
       var GWei = BigInt.from(1000000000);
-      var mintTx =
-          mintTokenTx(wcSession.theirAccounts![0], 'https://www.google.com');
+      var mintTx = mintTokenTx(wcSession.theirAccounts![0],
+          'https://www.google.com', 'https://www.google.com');
       var params = [
         {
           'from': wcSession.theirAccounts![0],
